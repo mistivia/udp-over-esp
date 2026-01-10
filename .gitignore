@@ -1,0 +1,6 @@
+*.d
+*.o
+client
+server
+client-config.ini
+server-config.ini

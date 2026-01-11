@@ -1,11 +1,9 @@
-cflags = -g
+cflags = -g -I/usr/local/include/
 ldflags = -lm
 cc = gcc
 
 src = $(shell find src/ -name '*.c' -not -name '*main.c')
 obj = $(src:.c=.o)
-tests=$(shell find tests/ -name '*.c')
-tests_bin=$(tests:.c=.bin)
 
 all: server client
 
@@ -28,9 +26,6 @@ src/server-main.o:src/server-main.c
 
 src/client-main.o:src/client-main.c
 	$(cc) -c $(cflags) $< -MD -MF $@.d -o $@
-
-$(tests_bin):%.bin:%.c $(obj)
-	$(cc) -Isrc/ $(cflags) $(ldflags) $< $(obj) -MD -MF $@.d -o $@
 
 clean:
 	-rm $(shell find tests/ -name '*.bin')

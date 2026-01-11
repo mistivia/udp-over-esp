@@ -2,32 +2,37 @@
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <sys/types.h>
+#include <algds/vec.h>
 
 typedef struct session {
     struct sockaddr_storage client_addr; 
     int udp_sock;
     time_t last_active;
-    struct session *next;
-} session_t;
+} Session;
 
-session_t *head = NULL;
+void Session_show(Session self, FILE *fp) {}
+
 uint32_t global_seq = 1;
 uint32_t global_spi = 0;
 
-session_t* get_session(struct sockaddr_storage *addr, struct config *cfg) {
-    session_t *curr = head;
-    while (curr) {
+VECTOR_DEF_AS(Session, VSession);
+VECTOR_IMPL_AS(Session, VSession);
+
+VSession sessions;
+
+Session* get_session(struct sockaddr_storage *addr, struct config *cfg) {
+    for (int i = 0; i < sessions.size; i++) {
+        Session *curr = &sessions.buffer[i];
         if (sockaddr_cmp((struct sockaddr*)&curr->client_addr, (struct sockaddr*)addr) == 0) {
             curr->last_active = time(NULL);
             return curr;
         }
-        curr = curr->next;
     }
 
-    session_t *new_node = (session_t*)malloc(sizeof(session_t));
-    memset(new_node, 0, sizeof(session_t));
-    memcpy(&new_node->client_addr, addr, sizeof(struct sockaddr_storage));
-    new_node->last_active = time(NULL);
+    Session new_node;
+    memset(&new_node, 0, sizeof(Session));
+    memcpy(&new_node.client_addr, addr, sizeof(struct sockaddr_storage));
+    new_node.last_active = time(NULL);
 
     struct sockaddr_storage target = {0};
     socklen_t tlen;
@@ -38,48 +43,42 @@ session_t* get_session(struct sockaddr_storage *addr, struct config *cfg) {
         inet_pton(AF_INET6, cfg->target_ip, &t6->sin6_addr);
         t6->sin6_port = htons(cfg->target_port);
         tlen = sizeof(struct sockaddr_in6);
-        new_node->udp_sock = socket(AF_INET6, SOCK_DGRAM, 0);
+        new_node.udp_sock = socket(AF_INET6, SOCK_DGRAM, 0);
     } else {
         struct sockaddr_in *t4 = (struct sockaddr_in *)&target;
         t4->sin_family = AF_INET;
         t4->sin_addr.s_addr = inet_addr(cfg->target_ip);
         t4->sin_port = htons(cfg->target_port);
         tlen = sizeof(struct sockaddr_in);
-        new_node->udp_sock = socket(AF_INET, SOCK_DGRAM, 0);
+        new_node.udp_sock = socket(AF_INET, SOCK_DGRAM, 0);
     }
 
-    if (new_node->udp_sock < 0) {
+    if (new_node.udp_sock < 0) {
         perror("Create UDP socket failed");
-        free(new_node);
         return NULL;
     }
 
-    if (connect(new_node->udp_sock, (struct sockaddr*)&target, tlen) < 0) {
+    if (connect(new_node.udp_sock, (struct sockaddr*)&target, tlen) < 0) {
         perror("Connect to target failed");
-        close(new_node->udp_sock);
-        free(new_node);
+        close(new_node.udp_sock);
         return NULL;
     }
 
-    new_node->next = head;
-    head = new_node;
+    VSession_push_back(&sessions, new_node);
     
-    printf("New session created. UDP Socket: %d\n", new_node->udp_sock);
-    return new_node;
+    printf("New session created. UDP Socket: %d\n", new_node.udp_sock);
+    return &sessions.buffer[sessions.size - 1];
 }
 
 void cleanup_sessions() {
     time_t now = time(NULL);
-    session_t **curr = &head;
-    while (*curr) {
-        if (now - (*curr)->last_active > 60) {
-            session_t *temp = *curr;
-            close(temp->udp_sock);
-            *curr = temp->next;
-            free(temp);
+    for (int i = 0; i < sessions.size; i++) {
+        Session *curr = &sessions.buffer[i];
+        if (now - curr->last_active > 60) {
+            close(curr->udp_sock);
+            VSession_remove(&sessions, i);
+            i--;
             printf("Session closed due to timeout.\n");
-        } else {
-            curr = &(*curr)->next;
         }
     }
 }
@@ -112,6 +111,7 @@ int main(int argc, char **argv) {
     }
     struct config cfg = {0};
     load_config(argv[1], &cfg, 1);
+    VSession_init(&sessions);
 
     while(global_spi < 5000) global_spi = gen_rand_32b();
     global_seq = gen_rand_32b();
@@ -151,15 +151,13 @@ int main(int argc, char **argv) {
             FD_SET(raw_sock, &readfds);
             if (raw_sock > max_fd) max_fd = raw_sock;
         }
-
-        session_t *curr = head;
-        while (curr) {
+        for (int i = 0; i < sessions.size; i++) {
+            Session *curr = &sessions.buffer[i];
             FD_SET(curr->udp_sock, &readfds);
             if (curr->udp_sock > max_fd) max_fd = curr->udp_sock;
-            curr = curr->next;
         }
 
-        tv.tv_sec = 1; tv.tv_usec = 0;
+        tv.tv_sec = 10; tv.tv_usec = 0;
         int ret = select(max_fd + 1, &readfds, NULL, NULL, &tv);
 
         if (ret == 0) { cleanup_sessions(); continue; }
@@ -173,7 +171,7 @@ int main(int argc, char **argv) {
                     char *payload_ptr = buffer + sizeof(struct esp_header);
                     int payload_len = n - sizeof(struct esp_header);
 
-                    session_t *sess = get_session(&src_addr, &cfg);
+                    Session *sess = get_session(&src_addr, &cfg);
                     if (sess) {
                         send(sess->udp_sock, payload_ptr, payload_len, 0);
                     }
@@ -181,21 +179,20 @@ int main(int argc, char **argv) {
             }
         }
 
-        curr = head;
-        while (curr) {
+        for (int i = 0; i < sessions.size; i++) {
+            Session *curr = &sessions.buffer[i];
             if (FD_ISSET(curr->udp_sock, &readfds)) {
                 int n = recv(curr->udp_sock, buffer, BUF_SIZE, 0);
                 if (n > 0) {
                     curr->last_active = time(NULL);
-                    printf("server udp recv, len: %d\n", n);
+                    // printf("server udp recv, len: %d\n", n);
                     send_esp_to_client(raw_sock, &curr->client_addr, buffer, n);
                 }
             }
-            curr = curr->next;
         }
         
         static int loop_count = 0;
-        if (++loop_count % 60 == 0) cleanup_sessions();
+        if (++loop_count % 6 == 0) cleanup_sessions();
     }
     
     if (raw_sock > 0) close(raw_sock);

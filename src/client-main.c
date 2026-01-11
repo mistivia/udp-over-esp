@@ -35,7 +35,7 @@ void send_esp_to_server(int raw_sock, struct sockaddr *dest, socklen_t dest_len,
     esp->seq = htonl(global_seq++);
 
     memcpy(packet + sizeof(struct esp_header), data, len);
-    printf("client esp send, len: %d\n", (int)sizeof(struct esp_header) + len);
+    // printf("client esp send, len: %d\n", (int)sizeof(struct esp_header) + len);
     sendto(raw_sock, packet, sizeof(struct esp_header) + len, 0, dest, dest_len);
 }
 
@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
             socklen_t slen = sizeof(src);
             int n = recvfrom(udp_sock, buffer, BUF_SIZE, 0, (struct sockaddr*)&src, &slen);
             if (n > 0) {
-                printf("client udp recv, len: %d\n", n);
+                // printf("client udp recv, len: %d\n", n);
                 memcpy(&client_addr, &src, slen);
                 client_addr_len = slen;
                 has_client = 1;
@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
             socklen_t slen = sizeof(src_ip_addr);
 
             int n = recvfrom(raw_sock, buffer, BUF_SIZE, 0, (struct sockaddr*)&src_ip_addr, &slen);
-            printf("client esp recv, len: %d\n", n);
+            // printf("client esp recv, len: %d\n", n);
             if (n > 0) {
                 // esp addr filter
                 if (!is_same_addr((struct sockaddr*)&server_addr, (struct sockaddr*)&src_ip_addr)) {
@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
                     int payload_len = esp_total_len - sizeof(struct esp_header);
                     
                     if (payload_len > 0) {
-                        printf("client udp send, len: %d\n", payload_len);
+                        // printf("client udp send, len: %d\n", payload_len);
                         send_udp_to_client(udp_sock, payload_ptr, payload_len);
                     }
                 }

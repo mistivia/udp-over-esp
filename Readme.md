@@ -6,6 +6,7 @@ Currently the client only support 1 client session, but the server can accept mu
 
 ## Diagram
 
-<img width="984" height="477" alt="image" src="https://github.com/user-attachments/assets/6e98889c-f175-4643-ba7f-4d6c45b42610" />
+<img width="1760" height="608" alt="image" src="https://github.com/user-attachments/assets/ac112d87-d663-442d-b04f-b0665664460b" />
+
 
 
